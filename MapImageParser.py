@@ -1,15 +1,13 @@
-import numpy as np
-import cv2
+#import numpy as np
+#import cv2
+from controlBars import thresh_bars_hsv as tbh
 
-class MapDefiner:
-    def __init__(self, image):
-        self.__image = image
-        self.__map  = dict()
+#static shit happens
+class MapImageParser:
+    img   = None
+    graph = None
+    
+    @classmethod
+    def parse(cls):
+        tbh("1", cls.img)
         return
-    
-    def define(self):
-        #do smth with __image
-        pass
-    
-    def get_map(self):
-        return self.__map
