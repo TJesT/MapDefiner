@@ -73,7 +73,6 @@ def get_kernel(id_int):
     return ret
 
 maps   = "maps/"
-output = "out/"
 
 erode_kernel  = get_kernel(3)
 dilate_kernel = get_kernel(1)
@@ -165,7 +164,7 @@ for fn in data.keys():
             if ((line1[1] == line1[3]) and (line2[1] == line2[3])) or \
                 (line1[0] == line1[2]) and (line2[0] == line2[2]):
                     apro_lines[i], apro_lines[j] = force_align(line1, line2, 20)
-       
+     
 #    print(apro_lines)
     
     for line in apro_lines:
@@ -177,6 +176,8 @@ for fn in data.keys():
     cv2.imshow(fn + " threshold", thresh_data[fn])
 
 cv2.waitKey(0)
+
+
 cv2.destroyAllWindows()
 
 
