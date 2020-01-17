@@ -1,16 +1,46 @@
 from os.path import isfile, join
 from os import listdir
 from controlBars import thresh_bars_hsv as tbh, erode_dilate_bars as edb
+from HoughBundler import HoughBundler as HB
 #import MapImageParser as MIP
 import numpy as np
 import cv2
+
+class NoIntersectionError(Exception):
+    pass
+
+class InfiniteResultOfIntersectionError(Exception):
+    pass
 
 def line_parametres(x1,y1,x2,y2):
     phi = np.arctan2(y2 - y1, x2 - x1)
     h   = y1 - x1 * np.tan(phi)
     return (phi, h)
 
+def force_aproximate(x1,y1,x2,y2):
+    if abs(x1 - x2) > abs(y1 - y2):
+        return (x1, min(y1, y2), x2, min(y1, y2))
+    else:
+        return (min(x1, x2), y1, min(x1, x2), y2)
+
+def force_align(line1, line2, threshold):
+    if line1[0] == line1[2]:
+        if abs(line1[0] - line2[0]) < threshold:
+            return (line1, (line1[0], line2[1], line1[2], line2[3]))
+        else:
+            return (line1, line2)
+    if line1[1] == line1[3]:
+        if abs(line1[1] - line2[1]) < threshold:
+            return (line1, (line2[0], line1[1], line2[2], line1[3]))
+        else:
+            return (line1, line2)
+    return (line1, line2)
+
 def intersection_point(phi1, h1, phi2, h2):
+    if abs(phi1 - phi2) < 0.01:
+        if abs(h2 - h1) < 0.01:
+            raise InfiniteResultOfIntersectionError("The same line given")
+        raise NoIntersectionError("Lines have no intercetion point")
     x = (h2 - h1) / (np.tan(phi1) - np.tan(phi2))
     y = x * np.tan(phi1) + h1
     return (int(x),int(y))
@@ -78,7 +108,8 @@ for fn in hsv_data.keys():
     morph = rotate_image(morph, phi)
     img   = rotate_image(img,   phi)
     
-    lines = cv2.HoughLinesP(morph, 1, np.pi / 180, 50, 400, 100, 10)
+    lines = cv2.HoughLinesP(morph, rho=1, theta=np.pi / 180, threshold=80, 
+                            minLineLength=100, maxLineGap=10)
 
     h_lines = sorted(lines, key=lambda line: max(line.ravel()[1], line.ravel()[3]))
     d_line  = h_lines[-1].ravel()
@@ -104,18 +135,44 @@ for fn in hsv_data.keys():
     img   = cv2.warpPerspective(img, nohomo, (640, 640))
     
     data[fn]        = img
-    thresh_data[fn] = cv2.erode(morph, kernel=dilate_kernel, iterations=1)
+    morph = cv2.erode(morph, kernel=erode_kernel, iterations=1)
+    thresh_data[fn] = morph
     #cv2.imshow(fn,                    img)
     #cv2.imshow(fn + " thresholded", morph)
 
+hough_bundler = HB()
+
 for fn in data.keys():
-    lines = cv2.HoughLinesP(thresh_data[fn], 1, np.pi / 180, 25, 400, 100, 10)
-    print(len(lines))
-    for line in lines:
-        for x1,y1,x2,y2 in line:
-            cv2.line(data[fn], (x1,y1), (x2,y2), (255,0,0), 3)
+    lines = cv2.HoughLinesP(thresh_data[fn], rho=1, theta=np.pi / 4, 
+                            threshold=30, minLineLength=100, maxLineGap=20)
     
-    cv2.imshow(fn,        data[fn])
+    m_lines = hough_bundler.process_lines(lines, thresh_data[fn])
+    apro_lines = []
+    
+#    print(len(lines))
+#    print(len(m_lines))
+    for i in range(len(m_lines)):
+        p1, p2 = m_lines[i]
+        apro_lines.append(force_aproximate(*p1, *p2))
+    
+    del m_lines
+    
+    img = data[fn].copy()
+    
+    for i in range(len(apro_lines)):
+        for j in range(i+1, len(apro_lines)):
+            line1, line2 = apro_lines[i], apro_lines[j]
+            if ((line1[1] == line1[3]) and (line2[1] == line2[3])) or \
+                (line1[0] == line1[2]) and (line2[0] == line2[2]):
+                    apro_lines[i], apro_lines[j] = force_align(line1, line2, 20)
+       
+#    print(apro_lines)
+    
+    for line in apro_lines:
+        x1,y1,x2,y2 = line
+        cv2.line(img, (x1,y1), (x2, y2), (0, 255, 0), 3)
+    
+    cv2.imshow(fn,                            img)
     
     cv2.imshow(fn + " threshold", thresh_data[fn])
 
