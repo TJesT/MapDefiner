@@ -2,13 +2,26 @@ import numpy as np
 import cv2
 from HoughBundler import HoughBundler as HB
 
+MIN_LEN = 35
+
 class NoIntersectionError(Exception):
     pass
 
 class InfiniteResultOfIntersectionError(Exception):
     pass
 
+def delete_dots(lines, thresh):
+    ls = lines.copy()
+    ls = sorted(ls, key=lambda l: distance(*l[:2], *l[2:]))
+    for i in range(len(ls)):
+        if distance(*ls[i][:2], *ls[i][2:]) > thresh:
+            del ls[0:i]
+            break
+    return ls
+
 def force_aproximate(x1,y1,x2,y2):
+    if 5 < np.degrees(np.arctan2(abs(y1-y2), abs(x1-x2))) < 85:
+        return (x1, y1, x2, y2)
     if abs(x1 - x2) > abs(y1 - y2):
         return (x1, min(y1, y2), x2, min(y1, y2))
     else:
@@ -26,6 +39,17 @@ def force_align(line1, line2, threshold):
         else:
             return (line1, line2)
     return (line1, line2)
+
+def distance(x1, y1, x2, y2):
+    return ( (x1 - x2) ** 2 + (y1 - y2) ** 2 ) ** 0.5
+
+def line_distance(l, p):
+    a = distance(*l)
+    b = distance(*l[:2], *p)
+    c = distance(*l[2:], *p)
+    p = (a + b + c)/2
+    s = (p * (p - a) * (p - b) * (p - c)) ** 0.5
+    return 2 * s / a
 
 def intersection_point(phi1, h1, phi2, h2):
     if abs(phi1 - phi2) < 0.01:
@@ -75,19 +99,17 @@ hough_bundler = HB()
 #static shit happens
 class MapImageParser:
 
+#    def edge_boarders(cls, boarders, cx, cy):
+#        
+#        h_e = sorted(boarders, key=lambda l: line_distance(l))
+    
     @classmethod
-    def get_boarders(cls, img, threshold):
-        lines = cv2.HoughLinesP(threshold, rho=1, theta=np.pi / 4, 
-                            threshold=30, minLineLength=100, maxLineGap=20)
-        
-        m_lines = hough_bundler.process_lines(lines, threshold)
+    def aproximate_boarders(cls, m_lines):
         apro_lines = []
         
         for i in range(len(m_lines)):
             p1, p2 = m_lines[i]
             apro_lines.append(force_aproximate(*p1, *p2))
-        
-        del m_lines
         
         for i in range(len(apro_lines)):
             for j in range(i+1, len(apro_lines)):
@@ -95,7 +117,27 @@ class MapImageParser:
                 if ((line1[1] == line1[3]) and (line2[1] == line2[3])) or \
                     (line1[0] == line1[2]) and (line2[0] == line2[2]):
                         apro_lines[i], apro_lines[j] = force_align(line1, line2, 20)
+        return apro_lines
+    
+    @classmethod
+    def get_boarders(cls, img, threshold):
+        lines = cv2.HoughLinesP(threshold, rho=1, theta=np.pi / 4, 
+                            threshold=40, minLineLength=MIN_LEN, maxLineGap=40)
         
+        m_lines = hough_bundler.process_lines(lines, threshold)
+        
+        apro_lines = []
+        
+        for i in range(len(m_lines)):
+            p1, p2 = m_lines[i]
+            apro_lines.append(force_aproximate(*p1, *p2))
+        
+        for i in range(len(apro_lines)):
+            for j in range(i+1, len(apro_lines)):
+                line1, line2 = apro_lines[i], apro_lines[j]
+                if ((line1[1] == line1[3]) and (line2[1] == line2[3])) or \
+                    (line1[0] == line1[2]) and (line2[0] == line2[2]):
+                        apro_lines[i], apro_lines[j] = force_align(line1, line2, 20)
         return apro_lines
     
     @classmethod
@@ -144,19 +186,31 @@ class MapImageParser:
         nohomo, _ = cv2.findHomography(src_sq, dst_sq)
         morph = cv2.warpPerspective(morph, nohomo, (640, 640))
         img   = cv2.warpPerspective(img, nohomo, (640, 640))
-        return img, morph
+        return img, cv2.erode(morph, kernel=dilate_kernel, iterations=1)
 
-image = cv2.imread("maps/map1.jpg")
+image        = cv2.imread("maps/map2.jpg")
 image, morph = MapImageParser.parse(image)
 boarders     = MapImageParser.get_boarders(image, morph)
+edge_boarders = sorted(boarders, key=lambda l: line_distance(
+        l, (image.shape[0]/2, image.shape[1]/2)), reverse=True)[:8]
 
-horizontals = list(filter(lambda l: l[0] == l[2], boarders))
-verticals = list(filter(lambda l: l[1] == l[3], boarders))
-for line in horizontals:
-    x1,y1,x2,y2 = line
-    cv2.line(image, (x1,y1), (x2, y2), (0, 255, 0), 3)
-#
-cv2.imshow("map1", image)
-#cv2.imshow("map1 threshold", morph)
+#boarders = sorted(boarders, key=lambda l: distance(*l[0], *l[1]))
+
+#horizontals = list(filter(lambda l: l[0] == l[2], boarders))
+#verticals   = list(filter(lambda l: l[1] == l[3], boarders))
+
+boarders = delete_dots(boarders, MIN_LEN)
+
+for line in boarders:
+    x1, y1, x2, y2 = line
+    cv2.line(image, (x1,y1), (x2, y2), (255, 0, 0), 3)
+
+
+for line in edge_boarders:
+    x1, y1, x2, y2 = line
+    cv2.line(image, (x1,y1), (x2, y2), (0, 0, 255), 3)
+
+cv2.imshow("map2", image)
+cv2.imshow("map1 threshold", morph)
 cv2.waitKey(0)
 cv2.destroyAllWindows()
