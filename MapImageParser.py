@@ -22,7 +22,7 @@ def contours(morph):
         n_l_c   = ((max_x + min_x)/2, (max_y + min_y)/2)
         if distance(*l_c, *n_l_c) < 75 or \
         distance(min_x, min_y, max_x, max_y) < MIN_LEN * 2 ** 0.5 or \
-        distance(320, 320, *n_l_c) < 10:
+        distance(320, 320, *n_l_c) < 30:
 #            print("l_c:", l_c, "n_l_c:", n_l_c, "point:", (min_x, min_y, max_x, max_y))
             continue
         else:
@@ -155,7 +155,7 @@ def rotate_image(image, angle):
     M[0, 2] += (nW / 2) - cX
     M[1, 2] += (nH / 2) - cY
  
-    return cv2.warpAffine(image, M, (nW, nH))
+    return cv2.warpAffine(image, M, (640, 640))
 
 def get_kernel(id_int):
     ret = []
@@ -264,7 +264,7 @@ class MapImageParser:
         img   = cv2.warpPerspective(img, nohomo, (640, 640))
         return img, morph#cv2.erode(morph, kernel=dilate_kernel, iterations=1)
 
-image        = cv2.imread("maps/2.jpg")
+image        = cv2.imread("maps/7.jpg")
 image, morph = MapImageParser.parse(image)
 #cv2.imshow("1", image)
 #cv2.waitKey(0)
