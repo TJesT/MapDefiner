@@ -5,10 +5,11 @@ class Roadmap():
         parse_map_img(read_img) # построить граф
         self.robot_x = x
         self.robot_y = y
+        self.img     = read_img # сюда квадрат
         return
     
     def getTangent(self):
-        return 0.0
+        return (0,0,0,0)
 	
     def setTrace(self, time, alpha, last_v, v):
         return

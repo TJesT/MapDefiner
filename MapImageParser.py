@@ -4,11 +4,42 @@ from HoughBundler import HoughBundler as HB
 
 MIN_LEN = 35
 
-class NoIntersectionError(Exception):
+class IntersectionError(Exception):
     pass
 
-class InfiniteResultOfIntersectionError(Exception):
-    pass
+def contours(morph):
+    contours, _ = cv2.findContours(morph, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
+#    print(len(contours))
+    cntrs = []
+    l_c = (320,320)
+    for c in sorted(contours, key=lambda x: distance(0,0,
+        (min(x.ravel()[0::2])+max(x.ravel()[0::2]))/2, 
+        (min(x.ravel()[1::2])+max(x.ravel()[1::2]))/2)):
+        max_x = max(c.ravel()[0::2])
+        min_x = min(c.ravel()[0::2])
+        max_y = max(c.ravel()[1::2])
+        min_y = min(c.ravel()[1::2])
+        n_l_c   = ((max_x + min_x)/2, (max_y + min_y)/2)
+        if distance(*l_c, *n_l_c) < 75 or \
+        distance(min_x, min_y, max_x, max_y) < MIN_LEN * 2 ** 0.5 or \
+        distance(320, 320, *n_l_c) < 10:
+#            print("l_c:", l_c, "n_l_c:", n_l_c, "point:", (min_x, min_y, max_x, max_y))
+            continue
+        else:
+#            print("l_c:", l_c, "n_l_c:", n_l_c, "point:", (min_x, min_y, max_x, max_y))
+            cntrs.append((min_x, min_y, max_x, max_y))
+            l_c = n_l_c
+    return cntrs
+
+def boarders_from_contours(c):
+    b = []
+    for c_ in c:
+        x1, y1, x2, y2 = c_
+        b += [(x1,y1,x1,y2), 
+              (x1,y2,x2,y2), 
+              (x2,y2,x2,y1), 
+              (x2,y1,x1,y1)]
+    return b
 
 def delete_dots(lines, thresh):
     ls = lines.copy()
@@ -19,15 +50,54 @@ def delete_dots(lines, thresh):
             break
     return ls
 
+def nearest_intersections(line, a_lines):
+    all_intersections = []
+    phi, h = line_parametres(*line)
+    cx, cy = (line[0] + line[2])/2, (line[1] + line[3])/2
+    for l in a_lines:
+        try:
+            phi2, h2 = line_parametres(*l)
+            phi2 = (phi2 if abs(h2) < 100000 else l[0])
+            all_intersections.append(intersection_point(
+                    (phi if abs(h) < 100000 else line[0]), h, phi2, h2))
+#            print("fucking intersectors", *l)
+        except IntersectionError:
+            continue
+    all_intersections = list(set(all_intersections))
+    all_intersections = sorted(all_intersections, key=lambda p: distance(cx, cy, *p))
+    
+    p2 = all_intersections[1]
+    p1 = all_intersections[0]
+    n_line = p1 + (p2 if distance(*p1, *p2) > 10 else all_intersections[2])
+    return n_line
+
+def board_rotate(boards, cx, cy, reverse=False):
+    b = boards.copy()
+    r = -1 if reverse else 1
+    for i in range(len(b)):
+        n = get_normal(b[i], 5)
+        x1, y1, x2, y2 = b[i]
+        lx, ly = int((x1 + x2)/2), int((y1 + y2)/2)
+        if r*distance(cx, cy, lx + n[0], ly + n[1]) > r*distance(cx, cy, lx, ly):
+            b[i] = (b[i][2], b[i][3], b[i][0], b[i][1])
+    return b
+
+def get_normal(l, length=1):
+    x1, y1, x2, y2 = l
+    a = y2 - y1
+    b = x2 - x1
+    p = np.degrees(np.arctan2(a, b)) + 90 
+    return (np.cos(np.radians(p))*length, np.sin(np.radians(p))*length)
+
 def force_aproximate(x1,y1,x2,y2):
-    if 5 < np.degrees(np.arctan2(abs(y1-y2), abs(x1-x2))) < 85:
+    if 10 < np.degrees(np.arctan2(abs(y1-y2), abs(x1-x2))) < 80:
         return (x1, y1, x2, y2)
     if abs(x1 - x2) > abs(y1 - y2):
         return (x1, min(y1, y2), x2, min(y1, y2))
     else:
         return (min(x1, x2), y1, min(x1, x2), y2)
 
-def force_align(line1, line2, threshold):
+def force_align(line1, line2, threshold=0):
     if line1[0] == line1[2]:
         if abs(line1[0] - line2[0]) < threshold:
             return (line1, (line1[0], line2[1], line1[2], line2[3]))
@@ -52,10 +122,16 @@ def line_distance(l, p):
     return 2 * s / a
 
 def intersection_point(phi1, h1, phi2, h2):
-    if abs(phi1 - phi2) < 0.01:
-        if abs(h2 - h1) < 0.01:
-            raise InfiniteResultOfIntersectionError("The same line given")
-        raise NoIntersectionError("Lines have no intercetion point")
+    if abs(np.degrees(phi1 - phi2)) < 1:
+        if abs(h2 - h1) < 1:
+            raise IntersectionError("The same line given")
+        raise IntersectionError("Lines have no intercetion point")
+    if abs(h1) > 100000:
+#        print("1")
+        return (phi1, int(np.tan(phi2)*phi1 + h2))
+    if abs(h2) > 100000:
+#        print("2")
+        return (phi2, int(np.tan(phi1)*phi2 + h1))
     x = (h2 - h1) / (np.tan(phi1) - np.tan(phi2))
     y = x * np.tan(phi1) + h1
     return (int(x),int(y))
@@ -136,7 +212,7 @@ class MapImageParser:
             for j in range(i+1, len(apro_lines)):
                 line1, line2 = apro_lines[i], apro_lines[j]
                 if ((line1[1] == line1[3]) and (line2[1] == line2[3])) or \
-                    (line1[0] == line1[2]) and (line2[0] == line2[2]):
+                    ((line1[0] == line1[2]) and (line2[0] == line2[2])):
                         apro_lines[i], apro_lines[j] = force_align(line1, line2, 20)
         return apro_lines
     
@@ -186,31 +262,55 @@ class MapImageParser:
         nohomo, _ = cv2.findHomography(src_sq, dst_sq)
         morph = cv2.warpPerspective(morph, nohomo, (640, 640))
         img   = cv2.warpPerspective(img, nohomo, (640, 640))
-        return img, cv2.erode(morph, kernel=dilate_kernel, iterations=1)
+        return img, morph#cv2.erode(morph, kernel=dilate_kernel, iterations=1)
 
-image        = cv2.imread("maps/map2.jpg")
+image        = cv2.imread("maps/2.jpg")
 image, morph = MapImageParser.parse(image)
+#cv2.imshow("1", image)
+#cv2.waitKey(0)
+#cv2.destroyAllWindows
+
 boarders     = MapImageParser.get_boarders(image, morph)
-edge_boarders = sorted(boarders, key=lambda l: line_distance(
-        l, (image.shape[0]/2, image.shape[1]/2)), reverse=True)[:8]
+boarders     = sorted(boarders, key=lambda l: line_distance(
+        l, (image.shape[0]/2, image.shape[1]/2)), reverse=True)
+edge_boarders, boarders = boarders[:8], boarders[8:]
+#edge_boarders = board_rotate(edge_boarders, image.shape[0]/2, image.shape[1]/2)
+
+e_b_1 = edge_boarders[:4]
+e_b_2 = edge_boarders[4:]
 
 #boarders = sorted(boarders, key=lambda l: distance(*l[0], *l[1]))
 
 #horizontals = list(filter(lambda l: l[0] == l[2], boarders))
 #verticals   = list(filter(lambda l: l[1] == l[3], boarders))
 
-boarders = delete_dots(boarders, MIN_LEN)
+#boarders = delete_dots(boarders, MIN_LEN)
 
-for line in boarders:
+boarders = boarders_from_contours(contours(morph))
+
+n_b = [nearest_intersections(i, e_b_2) for i in e_b_1]+[nearest_intersections(i, e_b_1) for i in e_b_2]
+n_b = board_rotate(n_b, image.shape[0]/2, image.shape[1]/2)
+#a = nearest_intersections(edge_boarders[0], edge_boarders[1:])
+#b = nearest_intersections(e_b_1[1], e_b_2)
+#
+#cv2.line(image, a[:2], a[2:], (255,255,0), 3)
+#cv2.line(image, b[:2], b[2:], (255,255,0), 3)
+
+for line in boarders: # boarders:
     x1, y1, x2, y2 = line
     cv2.line(image, (x1,y1), (x2, y2), (255, 0, 0), 3)
+    xc, yc = int((x1 + x2)/2), int((y1 + y2)/2)
+    n = get_normal(line, 25)
+    cv2.line(image, (xc, yc), (xc + int(n[0]), yc + int(n[1])), (0, 255, 255), 3)
 
-
-for line in edge_boarders:
+for line in n_b:
     x1, y1, x2, y2 = line
+    xc, yc = int((x1 + x2)/2), int((y1 + y2)/2)
+    n = get_normal(line, 25)
     cv2.line(image, (x1,y1), (x2, y2), (0, 0, 255), 3)
+    cv2.line(image, (xc, yc), (xc + int(n[0]), yc + int(n[1])), (255, 0, 255), 3)
 
-cv2.imshow("map2", image)
-cv2.imshow("map1 threshold", morph)
+cv2.imshow(str(image.shape[:2]), image)
+cv2.imshow("map1 threshold",     morph)
 cv2.waitKey(0)
 cv2.destroyAllWindows()
